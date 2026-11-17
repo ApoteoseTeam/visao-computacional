@@ -1,3 +1,5 @@
+import argparse
+import shutil
 import subprocess
 
 import cv2
@@ -9,8 +11,12 @@ from collections import deque
 
 import numpy as np
 
-from detector import PersonDetector
-from tracker import PersonTracker
+if __package__:
+    from .detector import PersonDetector
+    from .tracker import PersonTracker
+else:
+    from detector import PersonDetector
+    from tracker import PersonTracker
 
 ROOT = Path(__file__).resolve().parent.parent
 VIDEO_PATH = ROOT / 'videos' / 'pessoas3.mp4'
@@ -417,6 +423,9 @@ def export_video(detector, points, fps_video, expected_frames=0):
 
 
 def converter_para_h264(video_path):
+    if shutil.which("ffmpeg") is None:
+        print("[EXPORT] FFmpeg ausente. Video MP4V preservado.")
+        return None
     video_path = Path(video_path)
 
     saida = video_path.with_name(
@@ -447,7 +456,30 @@ def converter_para_h264(video_path):
         print("[ERRO] Falha na conversão.")
         return None
 
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description='Reali: contagem de pessoas em video.')
+    parser.add_argument('--video', type=Path, default=VIDEO_PATH)
+    parser.add_argument('--model', type=Path, default=MODEL_PATH)
+    parser.add_argument('--config', type=Path, default=CONFIG_PATH)
+    parser.add_argument('--output-dir', type=Path, default=OUTPUT_DIR)
+    parser.add_argument('--provider', choices=('auto', 'cpu', 'cuda', 'directml', 'coreml'), default='auto')
+    parser.add_argument('--confidence', type=float, default=CONFIDENCE)
+    parser.add_argument('--display-width', type=int, default=DISPLAY_WIDTH)
+    args = parser.parse_args(argv)
+    if not 0 < args.confidence <= 1:
+        parser.error('--confidence deve estar entre 0 (exclusivo) e 1.')
+    if args.display_width < 320:
+        parser.error('--display-width deve ser pelo menos 320.')
+    return args
+
+
+def main(argv=None):
+    global VIDEO_PATH, MODEL_PATH, CONFIG_PATH, OUTPUT_DIR, DISPLAY_WIDTH
+    args = parse_args(argv)
+    VIDEO_PATH, MODEL_PATH = args.video.expanduser().resolve(), args.model.expanduser().resolve()
+    CONFIG_PATH = args.config.expanduser().resolve()
+    OUTPUT_DIR = args.output_dir.expanduser().resolve()
+    DISPLAY_WIDTH = args.display_width
     if not VIDEO_PATH.is_file():
         raise FileNotFoundError(f'Video nao encontrado: {VIDEO_PATH}')
     if not MODEL_PATH.is_file():
@@ -455,16 +487,23 @@ def main():
     cap = cv2.VideoCapture(str(VIDEO_PATH))
     if not cap.isOpened():
         raise RuntimeError(f'Falha ao abrir {VIDEO_PATH}')
+    try:
+        detector = PersonDetector(model_path=str(MODEL_PATH), confidence=args.confidence, provider=args.provider)
+    except Exception:
+        cap.release()
+        raise
     fps_video = cap.get(cv2.CAP_PROP_FPS)
     if fps_video <= 0 or fps_video > 240:
         fps_video = 30.0
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if w <= 0 or h <= 0:
+        cap.release()
+        raise RuntimeError("Resolucao do video invalida.")
     display_w = min(w, DISPLAY_WIDTH)
     display_h = round(h * display_w / w)
     ui = CalibrationUI(load_points())
     ui.set_size(w, h, display_w, display_h)
-    detector = PersonDetector(model_path=str(MODEL_PATH), confidence=CONFIDENCE)
     def reset():
         return PersonTracker(), GateCounter(), deque(maxlen=60)
     tracker, counter, processing_times = reset()

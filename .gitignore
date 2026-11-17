@@ -1,2 +1,5 @@
 .venv-directml
 .venv-export
+.venv/
+__pycache__/
+*.py[cod]

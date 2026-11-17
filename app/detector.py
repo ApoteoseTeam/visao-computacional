@@ -12,7 +12,8 @@ class PersonDetector:
         self,
         model_path="models/yolo11n_960.onnx",
         confidence=0.25,
-        iou_threshold=0.65
+        iou_threshold=0.65,
+        provider="auto"
     ):
 
         self.confidence = confidence
@@ -29,14 +30,36 @@ class PersonDetector:
 
         options.enable_mem_pattern = False
 
-        self.session = ort.InferenceSession(
-            model_path,
-            sess_options=options,
-            providers=[
-                "DmlExecutionProvider",
-                "CPUExecutionProvider"
-            ]
-        )
+        available = ort.get_available_providers()
+        aliases = {
+            "cpu": "CPUExecutionProvider",
+            "cuda": "CUDAExecutionProvider",
+            "directml": "DmlExecutionProvider",
+            "coreml": "CoreMLExecutionProvider",
+        }
+        if provider == "auto":
+            preferred = [aliases[key] for key in ("cuda", "directml", "coreml")]
+            selected = next((name for name in preferred if name in available), aliases["cpu"])
+        else:
+            if provider not in aliases:
+                raise ValueError(f"Provedor desconhecido: {provider}")
+            selected = aliases[provider]
+            if selected not in available:
+                raise ValueError(f"Provedor {provider} indisponivel. Disponiveis: {available}")
+        providers = [selected]
+        if selected != aliases["cpu"]:
+            providers.append(aliases["cpu"])
+        try:
+            self.session = ort.InferenceSession(
+                str(model_path), sess_options=options, providers=providers
+            )
+        except Exception:
+            if provider != "auto" or selected == aliases["cpu"]:
+                raise
+            print("[IA] Aceleracao indisponivel; tentando CPU.")
+            self.session = ort.InferenceSession(
+                str(model_path), sess_options=options, providers=[aliases["cpu"]]
+            )
 
         self.input_name = (
             self.session.get_inputs()[0].name

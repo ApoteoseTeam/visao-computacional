@@ -11,7 +11,7 @@ class USBCamera:
         width=640,
         height=480,
         fps=30,
-        backend="DSHOW",
+        backend="AUTO",
         use_mjpg=False
     ):
         self.camera_index = camera_index
@@ -51,7 +51,7 @@ class USBCamera:
 
         selected_backend = backends.get(
             self.backend.upper(),
-            cv2.CAP_DSHOW
+            cv2.CAP_ANY
         )
 
         self.cap = cv2.VideoCapture(
